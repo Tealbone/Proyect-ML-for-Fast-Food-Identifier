@@ -43,15 +43,30 @@ python -m http.server 8000
 Abre en tu navegador:
 http://localhost:8000
 
-Estructura del Proyecto 📂
-identificador-comida-chatarra/
-├── model/                  # Modelo TensorFlow.js
-│   ├── group1-shard1of1.bin
-│   └── model.json
-├── index.html              # Interfaz principal
-├── README.md               # Este archivo
-└── assets/                 # Recursos adicionales
+## Estructura del Proyecto 📂
 
+```bash
+identificador-comida-chatarra/
+│
+├── model/                  # Modelo TensorFlow.js convertido
+│   ├── group1-shard1of1.bin  # Pesos del modelo
+│   └── model.json           # Arquitectura del modelo
+│
+├── js/                     # Scripts JavaScript
+│   ├── app.js              # Lógica principal de la aplicación
+│   └── utils.js            # Funciones utilitarias
+│
+├── css/                    # Estilos CSS (si no usas solo Tailwind)
+│   └── styles.css          # Estilos adicionales
+│
+├── assets/                 # Recursos multimedia
+│   ├── images/             # Imágenes estáticas
+│   └── icons/              # Íconos del proyecto
+│
+├── index.html              # Interfaz principal
+├── README.md               # Documentación del proyecto
+└── LICENSE                 # Licencia del software
+```
 Dataset 🏋️‍♂️
 CLASS_NAMES = ['hamburger', 'pizza', 'ice_cream', 'tiramisu']
 
