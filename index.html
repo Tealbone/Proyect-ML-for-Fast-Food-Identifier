@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clasificador de Comida Chatarra</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <style>
+        .preview-image {
+            max-width: 100%;
+            max-height: 300px;
+            display: none;
+            margin: 0 auto;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 6px;
+            background-color: #4f46e5;
+            transition: width 0.3s ease;
+        }
+        .class-progress {
+            height: 8px;
+            background-color: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .class-progress-bar {
+            height: 100%;
+            background-color: #4f46e5;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <header class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-indigo-700 mb-3">Identificador de Comida Chatarra</h1>
+            <p class="text-lg text-gray-600">Sube imágenes de pizza, helado, hamburguesas o tiramisu</p>
+        </header>
+
+        <main class="bg-white rounded-xl shadow-md overflow-hidden p-6 mb-8">
+
+            <div class="mb-8">
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-indigo-400 transition-colors duration-200" id="dropZone">
+                    <input type="file" id="imageUpload" accept="image/*" class="hidden">
+                    <div class="flex flex-col items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-indigo-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p class="text-lg font-medium text-gray-700 mb-1">Arrastra y suelta una imagen aquí</p>
+                        <p class="text-sm text-gray-500">o haz clic para seleccionar un archivo</p>
+                        <p class="text-xs text-gray-400 mt-2">Formatos soportados: JPG, PNG, WEBP</p>
+                    </div>
+                </div>
+                <div class="progress-bar mt-2 rounded-full" id="uploadProgress"></div>
+            </div>
+
+            <div class="mb-8 text-center">
+                <img id="imagePreview" class="preview-image rounded-lg shadow-sm" alt="Vista previa de la imagen">
+            </div>
+
+            <div class="bg-gray-50 rounded-lg p-6">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Resultado de la clasificación</h2>
+                <div id="loadingIndicator" class="hidden flex items-center justify-center py-8">
+                    <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-500"></div>
+                    <span class="ml-3 text-gray-600">Analizando imagen...</span>
+                </div>
+                <div id="predictionResults" class="hidden">
+                    <div class="mb-4">
+                        <p class="text-sm font-medium text-gray-700 mb-1">La imagen parece ser:</p>
+                        <h3 class="text-2xl font-bold text-indigo-600" id="topPrediction">Comida</h3>
+                        <p class="text-sm text-gray-500 mt-1">Con una confianza del <span id="topConfidence" class="font-medium">90</span>%</p>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <h4 class="text-md font-medium text-gray-700 mb-3">Otras posibles clasificaciones:</h4>
+                        <div id="otherPredictions" class="space-y-3">
+
+                        </div>
+                    </div>
+                </div>
+                <div id="errorMessage" class="hidden text-center py-4 text-red-500 font-medium">
+                    Ocurrió un error al procesar la imagen. Intenta con otra.
+                </div>
+                <div id="initialMessage" class="text-center py-4 text-gray-500">
+                    Cargando modelo de clasificación...
+                </div>
+                <div id="modelStatus" class="text-center text-sm text-gray-400"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let model = null;
+        const classNames = [
+            "hamburger", "pizza", "ice_cream", "tiramisu",
+        ];
+
+        async function loadModel() {
+            try {
+                console.log('Cargando modelo...');
+                document.getElementById('modelStatus').textContent = 'Cargando modelo...';
+                
+                const modelJson = await fetch('model.json').then(response => response.json());
+            
+                if (modelJson.modelTopology.model_config.config.layers[0].config.batch_input_shape === undefined) {
+                    modelJson.modelTopology.model_config.config.layers[0].config.batch_input_shape = [null, 128, 128, 3];
+                }
+                
+                model = await tf.loadLayersModel(tf.io.fromMemory(modelJson));
+                
+                console.log('Modelo cargado correctamente');
+                document.getElementById('initialMessage').textContent = 'Modelo cargado. Sube una imagen de comida para comenzar el análisis.';
+                document.getElementById('modelStatus').textContent = 'Modelo cargado correctamente';
+                
+                await warmUpModel();
+                
+            } catch (error) {
+                console.error('Error al cargar el modelo:', error);
+                document.getElementById('initialMessage').textContent = 'Error al cargar el modelo. Recarga la página.';
+                document.getElementById('modelStatus').textContent = 'Error: ' + error.message;
+                showError('Error al cargar el modelo. Recarga la página.');
+            }
+        }
+
+        async function warmUpModel() {
+            const warmUpTensor = tf.zeros([1, 128, 128, 3]);
+            try {
+                await model.predict(warmUpTensor).data();
+                warmUpTensor.dispose();
+            } catch (e) {
+                console.log('Error en calentamiento del modelo:', e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadModel);
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('imageUpload');
+        const imagePreview = document.getElementById('imagePreview');
+        const progressBar = document.getElementById('uploadProgress');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // Drag and drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropZone.classList.add('border-indigo-500');
+            dropZone.classList.remove('border-gray-300');
+        }
+
+        function unhighlight() {
+            dropZone.classList.remove('border-indigo-500');
+            dropZone.classList.add('border-gray-300');
+        }
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const file = dt.files[0];
+            handleFile(file);
+        });
+
+        // Procesar el archivo
+        function handleFile(file) {
+            // Verificar que sea una imagen
+            if (!file.type.match('image.*')) {
+                showError('Por favor, sube un archivo de imagen válido');
+                return;
+            }
+
+            // Mostrar progreso
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += 10;
+                progressBar.style.width = `${progress}%`;
+                if (progress >= 100) {
+                    clearInterval(progressInterval);
+                    progressBar.style.width = '0%';
+                }
+            }, 50);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+                setTimeout(() => classifyImage(e.target.result), 300);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function classifyImage(imageSrc) {
+            if (!model) {
+                showError('El modelo no está cargado todavía. Espera un momento e intenta de nuevo.');
+                return;
+            }
+
+            document.getElementById('initialMessage').classList.add('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('predictionResults').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+
+            try {
+                const img = new Image();
+                img.src = imageSrc;
+                
+                await new Promise((resolve) => {
+                    img.onload = resolve;
+                });
+
+                const tensor = tf.browser.fromPixels(img)
+                    .resizeNearestNeighbor([128, 128])
+                    .toFloat()
+                    .div(tf.scalar(255.0))
+                    .expandDims();
+
+                // Hacer la predicción
+                const predictions = await model.predict(tensor).data();
+                tensor.dispose();
+                
+                // Procesar resultados
+                displayResults(predictions);
+                
+            } catch (error) {
+                console.error('Error al clasificar la imagen:', error);
+                showError('Error al procesar la imagen. Intenta con otra.');
+            } finally {
+                // Ocultar indicador de carga
+                document.getElementById('loadingIndicator').classList.add('hidden');
+            }
+        }
+
+        // Mostrar resultados
+        function displayResults(predictions) {
+            // Obtener los índices de las mejores predicciones
+            const top5 = Array.from(predictions)
+                .map((p, i) => ({ probability: p, className: classNames[i] || `Clase ${i}` }))
+                .sort((a, b) => b.probability - a.probability)
+                .slice(0, 5);
+
+            // Mostrar la mejor predicción
+            const topPrediction = top5[0];
+            document.getElementById('topPrediction').textContent = formatClassName(topPrediction.className);
+            document.getElementById('topConfidence').textContent = (topPrediction.probability * 100).toFixed(1);
+
+            // Mostrar otras predicciones
+            const otherPredictionsContainer = document.getElementById('otherPredictions');
+            otherPredictionsContainer.innerHTML = '';
+            
+            top5.slice(1).forEach(item => {
+                const predictionElement = document.createElement('div');
+                predictionElement.className = 'bg-white p-3 rounded-lg shadow-xs';
+                predictionElement.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-medium text-gray-700">${formatClassName(item.className)}</span>
+                        <span class="text-sm font-medium text-indigo-600">${(item.probability * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="class-progress">
+                        <div class="class-progress-bar" style="width: ${item.probability * 100}%"></div>
+                    </div>
+                `;
+                otherPredictionsContainer.appendChild(predictionElement);
+            });
+
+            // Mostrar resultados
+            document.getElementById('predictionResults').classList.remove('hidden');
+        }
+
+        function formatClassName(className) {
+            return className.split('_')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').classList.remove('hidden');
+            document.getElementById('initialMessage').classList.add('hidden');
+            document.getElementById('predictionResults').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
